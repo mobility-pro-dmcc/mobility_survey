@@ -1,0 +1,417 @@
+{% extends "templates/web.html" %}
+
+{% block style %}
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<style>
+    body { background-color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; }
+    .form-card {
+        background-color: #ffffff;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px 0 rgba(0, 0, 0, 0.03);
+        border-radius: 0.75rem;
+        transition: transform 0.2s ease, border-color 0.2s ease;
+    }
+    .form-card:hover { border-color: #cbd5e1; }
+    
+    /* Input field enhancement focus logic */
+    .frappe-control {
+        width: 100%;
+        padding: 0.625rem 0.875rem;
+        border: 1px solid #cbd5e1;
+        border-radius: 0.5rem;
+        font-size: 13px;
+        color: #0f172a;
+        background-color: #ffffff;
+        transition: all 0.15s ease;
+    }
+    .frappe-control:focus {
+        border-color: #0f172a;
+        box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.08);
+        outline: none;
+    }
+
+    /* Modern Custom Interactive Radio Rows */
+    .radio-row {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.75rem 1rem;
+        border: 1px solid #e2e8f0;
+        border-radius: 0.5rem;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 500;
+        color: #475569;
+        background-color: #ffffff;
+        transition: all 0.15s ease;
+    }
+    .radio-row:hover {
+        background-color: #f8fafc;
+        border-color: #cbd5e1;
+    }
+    .radio-row.selected-active {
+        background-color: #f1f5f9;
+        border-color: #0f172a;
+        color: #0f172a;
+        font-weight: 600;
+    }
+    
+    /* Progress Indicator Bar Animation tracking */
+    .progress-pill {
+        height: 4px;
+        border-radius: 9999px;
+        background-color: #e2e8f0;
+        flex: 1;
+        transition: all 0.3s ease;
+    }
+    .progress-pill.active { background-color: #0f172a; }
+</style>
+{% endblock %}
+
+{% block page_content %}
+<div class="max-w-2xl mx-auto my-12 px-4 font-sans">
+    
+    <div class="mb-8 flex flex-col gap-3">
+        <div class="flex justify-between items-center text-xs font-bold uppercase tracking-widest text-slate-400">
+            <span id="survey-title-header" class="text-slate-800 font-extrabold truncate max-w-md">Survey Processing Matrix</span>
+            <span id="pagination-tracker-label" class="bg-slate-100 text-slate-700 px-2 py-1 rounded">Step 0 of 0</span>
+        </div>
+        <div id="progress-bar-pipeline" class="flex gap-1.5 w-full mt-1"></div>
+    </div>
+
+    <div id="survey-render-canvas" class="space-y-6"></div>
+
+    <div class="mt-10 pt-5 border-t border-slate-200 flex items-center justify-between gap-4">
+        <button id="btn-back" onclick="navigatePage(-1)" class="bg-white border border-slate-300 hover:border-slate-400 text-slate-700 text-xs font-semibold py-2.5 px-5 rounded-lg shadow-xs transition hidden">
+            Back
+        </button>
+        <div class="flex-1"></div>
+        <button id="btn-next" onclick="navigatePage(1)" class="bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold py-2.5 px-6 rounded-lg shadow-sm transition hidden">
+            Next
+        </button>
+        <button id="btn-submit" onclick="submitFinalFormResponse()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold py-2.5 px-6 rounded-lg shadow-sm transition hidden">
+            Submit Survey
+        </button>
+    </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+    let surveyStructure = [];
+    let userAnswers = {}; 
+    let activePageIndex = 0;
+    let targetTemplateId = "";
+
+    document.addEventListener("DOMContentLoaded", () => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const nameParam = urlParams.get('name') || urlParams.get('template');
+        
+        if (nameParam) {
+            targetTemplateId = nameParam;
+        } else {
+            targetTemplateId = "Default-Mobility-Survey";
+        }
+
+        loadSurveyTemplateSchema();
+    });
+
+    function loadSurveyTemplateSchema() {
+        frappe.call({
+            method: "mobility_survey.api.get_survey_template",
+            args: { template_id: targetTemplateId },
+            freeze: true,
+            freeze_message: __("Preparing Survey Layout..."),
+            callback: function(r) {
+                if (r.message) {
+                    if (r.message.already_submitted) {
+                        showAlreadySubmittedScreen();
+                        return;
+                    }
+
+                    if (r.message.structure && r.message.structure.length > 0) {
+                        surveyStructure = r.message.structure;
+                        document.getElementById('survey-title-header').innerText = r.message.template_name || targetTemplateId;
+                        activePageIndex = 0;
+                        renderActivePage();
+                    } else {
+                        showEmptySchemaNotice();
+                    }
+                }
+            }
+        });
+    }
+
+    function showAlreadySubmittedScreen() {
+        document.getElementById('pagination-tracker-label').classList.add('hidden');
+        document.getElementById('progress-bar-pipeline').classList.add('hidden');
+        document.getElementById('btn-back').classList.add('hidden');
+        document.getElementById('btn-next').classList.add('hidden');
+        document.getElementById('btn-submit').classList.add('hidden');
+        
+        document.getElementById('survey-render-canvas').innerHTML = `
+            <div class="form-card p-8 text-center space-y-4 py-16 bg-white border border-slate-200 rounded-xl card-shadow">
+                <div class="w-14 h-14 bg-slate-100 text-slate-700 rounded-full flex items-center justify-center mx-auto text-lg font-bold">ℹ</div>
+                <h2 class="text-base font-bold text-slate-900">Survey Already Completed / تم إكمال الاستبيان مسبقاً</h2>
+                <p class="text-xs text-slate-500 max-w-sm mx-auto">You have already submitted answers for this template. Thank you!<br>لقد قمت بإرسال الإجابات لهذا النموذج مسبقاً. شكراً لك!</p>
+            </div>`;
+    }
+
+    function showEmptySchemaNotice() {
+        document.getElementById('survey-render-canvas').innerHTML = `
+            <div class="text-center py-16 border border-dashed border-slate-200 rounded-xl text-slate-400 text-xs italic bg-white card-shadow">
+                The requested survey matrix configuration metadata is blank or unavailable.<br>مخطط الاستبيان المطلوب غير متوفر أو فارغ حالياً.
+            </div>`;
+    }
+
+    function renderActivePage() {
+        const canvas = document.getElementById('survey-render-canvas');
+        const activeTab = surveyStructure[activePageIndex];
+        if (!activeTab) return;
+
+        canvas.innerHTML = `
+            <div class="mb-4">
+                <h2 class="text-lg font-extrabold text-slate-900 tracking-tight">${activeTab.title}</h2>
+            </div>
+            ${activeTab.sections.map(section => `
+                <div class="space-y-5 mb-8">
+                    <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-2">${section.title}</h3>
+                    ${section.questions.map(q => renderQuestionField(q)).join('')}
+                </div>
+            `).join('')}
+        `;
+
+        updatePaginationControls();
+    }
+
+    function renderQuestionField(q) {
+        let currentStoredValue = userAnswers[q.id] || '';
+        let inputHtml = '';
+        
+        const requiredAsterisk = q.required ? `<span class="text-rose-500 pl-0.5 font-bold" title="Mandatory field">*</span>` : '';
+
+        // RENDER METHOD 1: Instructional non-input comment headers
+        if (q.type === 'comment') {
+            return `
+                <div id="wrapper-${q.id}" class="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-2 text-xs text-slate-600 font-medium leading-relaxed">
+                    <div class="text-left font-semibold">${q.label}</div>
+                    ${q.label_ar ? `<div class="text-right font-sans text-slate-500 pt-1" dir="rtl">${q.label_ar}</div>` : ''}
+                </div>`;
+        }
+
+        // RENDER METHOD 2: Open text elements
+        if (q.type === 'text') {
+            inputHtml = `
+                <input type="text" value="${currentStoredValue}" 
+                    oninput="logAnswer('${q.id}', this.value)" 
+                    class="frappe-control" placeholder="Type your answer here... / اكتب الإجابة هنا...">`;
+        } 
+        // RENDER METHOD 3: Radio multi option selections
+        else if (q.type === 'options') {
+            const fieldOptions = q.options || [];
+            inputHtml = `<div class="space-y-2">
+                ${fieldOptions.map((opt) => {
+                    const isChecked = currentStoredValue === opt;
+                    return `
+                        <label class="radio-row ${isChecked ? 'selected-active' : ''}" onclick="selectRadioRowUI('${q.id}', this)">
+                            <input type="radio" name="radio_${q.id}" value="${opt}" ${isChecked ? 'checked' : ''}
+                                onchange="logAnswer('${q.id}', this.value)" 
+                                class="w-4 h-4 text-slate-900 border-slate-300 focus:ring-0 cursor-pointer">
+                            <span class="select-none">${opt}</span>
+                        </label>`;
+                }).join('')}
+            </div>`;
+        } 
+        // RENDER METHOD 4: Star interactive components
+        else if (q.type === 'rating') {
+            const maxStars = 5;
+            let currentRating = parseInt(currentStoredValue) || 0;
+            
+            inputHtml = `<div class="flex items-center gap-1.5 pt-1" id="rating-group-${q.id}">`;
+            for (let i = 1; i <= maxStars; i++) {
+                const isLit = i <= currentRating;
+                inputHtml += `
+                    <button onclick="logRatingAnswer('${q.id}', ${i})" 
+                        class="text-2xl transition-all duration-300 ${isLit ? 'text-amber-400 transform scale-110' : 'text-slate-200 hover:text-amber-200'}" type="button">
+                        ★
+                    </button>`;
+            }
+            inputHtml += `</div>`;
+        }
+
+        const isMarkedError = document.getElementById(`wrapper-${q.id}`)?.classList.contains('border-rose-300');
+        const cardStyleClasses = isMarkedError ? 'border-rose-300 bg-rose-50/10' : 'border-slate-200 bg-white';
+
+        return `
+            <div id="wrapper-${q.id}" class="form-card p-5 space-y-4 ${cardStyleClasses}">
+                <!-- CLEAN STACKED QUESTION LABELS (NO BORDER ON ARABIC) -->
+                <div class="flex flex-col gap-1.5">
+                    <label class="block text-xs font-bold text-slate-800 tracking-wide text-left leading-normal">
+                        ${q.label} ${requiredAsterisk}
+                    </label>
+                    ${q.label_ar ? `
+                    <label class="block text-xs font-bold text-slate-500 font-sans text-right leading-normal" dir="rtl">
+                        ${q.label_ar} ${requiredAsterisk}
+                    </label>` : ''}
+                </div>
+                
+                <!-- INPUT ELEMENT -->
+                <div class="pt-1">${inputHtml}</div>
+                
+                <!-- DUAL LANGUAGE VALIDATION RESPONSES -->
+                <p id="error-${q.id}" class="text-[11px] font-semibold text-rose-500 hidden leading-relaxed pt-1 border-t border-rose-100">
+                    <span class="block text-left">⚠️ This question requires a response before proceeding.</span>
+                    <span class="block text-right mt-1" dir="rtl">هذا الحقل مطلوب لإتمام الاستبيان قبل المتابعة.</span>
+                </p>
+            </div>`;
+    }
+
+    function selectRadioRowUI(questionId, labelElement) {
+        const parentCard = labelElement.parentElement;
+        const rows = parentCard.getElementsByClassName('radio-row');
+        for(let r of rows) { r.classList.remove('selected-active'); }
+        labelElement.classList.add('selected-active');
+        
+        const radioInput = labelElement.querySelector('input[type="radio"]');
+        if (radioInput && !radioInput.checked) {
+            radioInput.checked = true;
+            logAnswer(questionId, radioInput.value);
+        }
+    }
+
+    function logAnswer(questionId, value) {
+        userAnswers[questionId] = value;
+        const card = document.getElementById(`wrapper-${questionId}`);
+        const err = document.getElementById(`error-${questionId}`);
+        if (card && err && String(value).trim() !== "") {
+            card.className = "form-card p-5 space-y-3.5 border-slate-200 bg-white";
+            err.classList.add('hidden');
+        }
+    }
+
+    function logRatingAnswer(questionId, score) {
+        logAnswer(questionId, score);
+        const container = document.getElementById(`rating-group-${questionId}`);
+        if (!container) return;
+        const buttons = container.getElementsByTagName('button');
+        for (let i = 0; i < buttons.length; i++) {
+            if (i < score) {
+                buttons[i].className = "text-2xl text-amber-400 transition-all transform scale-110";
+            } else {
+                buttons[i].className = "text-2xl text-slate-200 hover:text-amber-200 transition-all";
+            }
+        }
+    }
+
+    function validateCurrentPageInputs() {
+        const activeTab = surveyStructure[activePageIndex];
+        if (!activeTab) return true;
+
+        let areAllValid = true;
+
+        activeTab.sections.forEach(section => {
+            section.questions.forEach(q => {
+                if (q.required && q.type !== 'comment') {
+                    let val = userAnswers[q.id];
+                    let isBlank = (val === undefined || val === null || String(val).trim() === "");
+                    
+                    const cardWrapper = document.getElementById(`wrapper-${q.id}`);
+                    const errorMsg = document.getElementById(`error-${q.id}`);
+
+                    if (isBlank) {
+                        areAllValid = false;
+                        if (cardWrapper && errorMsg) {
+                            cardWrapper.className = "form-card p-5 space-y-3.5 border-rose-300 bg-rose-50/10";
+                            errorMsg.classList.remove('hidden');
+                        }
+                    }
+                }
+            });
+        });
+
+        if (!areAllValid) {
+            frappe.show_alert({
+                message: __('Please complete all mandatory fields. / يرجى إكمال جميع الحقول الإلزامية.'), 
+                indicator: 'orange'
+            });
+        }
+        return areAllValid;
+    }
+
+    function navigatePage(direction) {
+        if (direction === 1 && !validateCurrentPageInputs()) return;
+
+        activePageIndex += direction;
+        renderActivePage();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function updatePaginationControls() {
+        const totalPages = surveyStructure.length;
+        document.getElementById('pagination-tracker-label').innerText = `Step ${activePageIndex + 1} of ${totalPages}`;
+
+        const barPipeline = document.getElementById('progress-bar-pipeline');
+        let pipelineHtml = '';
+        for (let i = 0; i < totalPages; i++) {
+            pipelineHtml += `<div class="progress-pill ${i <= activePageIndex ? 'active' : ''}"></div>`;
+        }
+        barPipeline.innerHTML = pipelineHtml;
+
+        const backBtn = document.getElementById('btn-back');
+        const nextBtn = document.getElementById('btn-next');
+        const submitBtn = document.getElementById('btn-submit');
+
+        if (activePageIndex > 0) backBtn.classList.remove('hidden');
+        else backBtn.classList.add('hidden');
+
+        if (activePageIndex === totalPages - 1) {
+            nextBtn.classList.add('hidden');
+            submitBtn.classList.remove('hidden');
+        } else {
+            nextBtn.classList.remove('hidden');
+            submitBtn.classList.add('hidden');
+        }
+    }
+
+    function submitFinalFormResponse() {
+        if (!validateCurrentPageInputs()) return;
+
+        let formattedAnswers = {};
+        surveyStructure.forEach(tab => {
+            tab.sections.forEach(section => {
+                section.questions.forEach(q => {
+                    if (q.type !== 'comment') {
+                        let rawValue = userAnswers[q.id];
+                        formattedAnswers[q.label] = (rawValue !== undefined && rawValue !== null) ? rawValue : "";
+                    }
+                });
+            });
+        });
+
+        frappe.call({
+            method: "mobility_survey.api.submit_survey_response",
+            args: {
+                template_id: targetTemplateId,
+                answers: JSON.stringify(formattedAnswers)
+            },
+            freeze: true,
+            freeze_message: __("Transmitting answers... / جاري إرسال الإجابات..."),
+            callback: function(r) {
+                if (!r.exc) {
+                    document.getElementById('pagination-tracker-label').classList.add('hidden');
+                    document.getElementById('progress-bar-pipeline').classList.add('hidden');
+                    document.getElementById('btn-back').classList.add('hidden');
+                    document.getElementById('btn-submit').classList.add('hidden');
+                    
+                    document.getElementById('survey-render-canvas').innerHTML = `
+                        <div class="form-card p-8 text-center space-y-4 py-16 bg-white border border-slate-200 rounded-xl card-shadow">
+                            <div class="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto text-2xl font-bold">✓</div>
+                            <h2 class="text-base font-bold text-slate-900">Submission Confirmed / تم تأكيد الإرسال بنجاح</h2>
+                            <p class="text-xs text-slate-500 max-w-sm mx-auto">Thank you for participating! Your data submission has been cleanly processed.<br>شكراً لمشاركتك! تم حفظ إجاباتك ومعالجتها بنجاح.</p>
+                        </div>`;
+                }
+            }
+        });
+    }
+</script>
+{% endblock %}

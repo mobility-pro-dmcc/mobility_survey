@@ -1,0 +1,354 @@
+{% extends "templates/web.html" %}
+
+{% block style %}
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<style>
+    body { background-color: #f8fafc; }
+    .frappe-input-flat {
+        border-bottom: 1px solid transparent;
+        font-weight: 500;
+        transition: all 0.15s ease;
+    }
+    .frappe-input-flat:hover { border-bottom-color: #e2e8f0; }
+    .frappe-input-flat:focus {
+        border-bottom-color: #1b1b29;
+        outline: none;
+    }
+    .card-shadow { box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px 0 rgba(0, 0, 0, 0.03); }
+    .action-pill {
+        display: inline-flex; align-items: center; gap: 0.375rem; padding: 0.375rem 0.75rem;
+        border-radius: 9999px; font-size: 11px; font-weight: 600; text-transform: uppercase;
+        letter-spacing: 0.05em; color: #64748b; background-color: #f1f5f9; transition: all 0.15s ease;
+    }
+    .action-pill:hover { background-color: #e2e8f0; color: #0f172a; }
+</style>
+{% endblock %}
+
+{% block page_content %}
+<div class="max-w-4xl mx-auto my-10 px-6 font-sans">
+    
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-200 pb-6 mb-8">
+        <div class="w-full sm:w-2/3">
+            <div class="flex items-center gap-2 mb-1">
+                <span class="text-xs bg-slate-200 text-slate-700 font-bold px-2 py-0.5 rounded uppercase tracking-wider whitespace-nowrap">Mode: Edit</span>
+                <input type="text" id="builder-title-input" 
+                    class="text-lg font-bold text-slate-900 tracking-tight frappe-input-flat w-full focus:border-slate-900" 
+                    value="" placeholder="Enter Template Display Name...">
+            </div>
+            <p class="text-xs text-slate-400 font-mono mt-0.5">Document ID Key: <span id="doc-id-badge" class="bg-slate-100 px-1 py-0.5 rounded">None</span></p>
+        </div>
+        <button onclick="saveSurveyStructure()" class="w-full sm:w-auto bg-slate-900 hover:bg-slate-800 text-white font-medium py-2 px-4 rounded shadow-sm text-xs tracking-wide transition whitespace-nowrap">
+            Save Template
+        </button>
+    </div>
+
+    <div class="flex items-center border-b border-slate-200 mb-8 overflow-x-auto gap-1" id="tabs-container"></div>
+    <div id="survey-canvas" class="space-y-8"></div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+    let surveyStructure = [];
+    let activeTabId = null;
+    let targetTemplateId = "Default-Mobility-Survey"; // Constant primary reference doc name
+    let descriptiveTemplateName = "";
+
+    function generateId() {
+        return 'node_' + Math.random().toString(36).substr(2, 9);
+    }
+
+    function initializeBuilderWorkspace() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const nameParam = urlParams.get('name'); // The primary document core record identifier key (name)
+        
+        if (nameParam) {
+            targetTemplateId = nameParam;
+        }
+
+        document.getElementById('doc-id-badge').innerText = targetTemplateId;
+
+         frappe.call({
+            method: "mobility_survey.api.get_survey_template",
+            args: { template_id: targetTemplateId },
+            freeze: true,
+            freeze_message: __("Loading Target Layout Matrix..."),
+            callback: function(r) {
+                let structureData = [];
+                if (r.message) {
+                    structureData = r.message.structure || [];
+                    descriptiveTemplateName = r.message.template_name || targetTemplateId;
+                }
+
+                document.getElementById('builder-title-input').value = descriptiveTemplateName;
+
+                if (structureData && structureData.length > 0) {
+                    surveyStructure = structureData;
+                    activeTabId = surveyStructure[0].id;
+                } else {
+                    surveyStructure = [{
+                        id: generateId(),
+                        title: 'Step 1',
+                        sections: [{
+                            id: generateId(),
+                            title: 'Primary Transit Modes',
+                            questions: [{ id: generateId(), type: 'text', label: 'What is your primary choice of transit?', label_ar: 'ما هي وسيلة النقل الأساسية لديك؟', required: false }]
+                        }]
+                    }];
+                    activeTabId = surveyStructure[0].id;
+                }
+                renderBuilder();
+            }
+        });
+    }
+
+    function addTab() {
+        const newTab = { id: generateId(), title: `Step ${surveyStructure.length + 1}`, sections: [] };
+        surveyStructure.push(newTab);
+        activeTabId = newTab.id;
+        renderBuilder();
+    }
+
+    function switchTab(tabId) { activeTabId = tabId; renderBuilder(); }
+
+    function removeTab(tabId, event) {
+        event.stopPropagation();
+        if (surveyStructure.length <= 1) return;
+        surveyStructure = surveyStructure.filter(t => t.id !== tabId);
+        if (activeTabId === tabId) { activeTabId = surveyStructure[0].id; }
+        renderBuilder();
+    }
+
+    function addSection(tabId) {
+        const tab = surveyStructure.find(t => t.id === tabId);
+        if (!tab) return;
+        tab.sections.push({ id: generateId(), title: 'New Section Block', questions: [] });
+        renderBuilder();
+    }
+
+    function removeSection(tabId, sectionId) {
+        const tab = surveyStructure.find(t => t.id === tabId);
+        if (tab) { tab.sections = tab.sections.filter(s => s.id !== sectionId); }
+        renderBuilder();
+    }
+
+    function addQuestion(tabId, sectionId, type) {
+        const tab = surveyStructure.find(t => t.id === tabId);
+        if (!tab) return;
+        const section = tab.sections.find(s => s.id === sectionId);
+        if (!section) return;
+
+        let newQuestion = {
+            id: generateId(),
+            type: type,
+            label: type === 'comment' ? 'Instructional comment text block...' : `Untitled ${type.charAt(0).toUpperCase() + type.slice(1)} Field`,
+            label_ar: type === 'comment' ? 'نص توضيحي أو إرشادي هنا...' : `حقل جديد غير معنون`,
+            required: false
+        };
+
+        if (type === 'options') newQuestion.options = ['Choice Alpha', 'Choice Beta'];
+        if (type === 'rating') newQuestion.max_stars = 5;
+
+        section.questions.push(newQuestion);
+        renderBuilder();
+    }
+
+    function removeQuestion(tabId, sectionId, questionId) {
+        const tab = surveyStructure.find(t => t.id === tabId);
+        if (!tab) return;
+        const section = tab.sections.find(s => s.id === sectionId);
+        if (section) { section.questions = section.questions.filter(q => q.id !== questionId); }
+        renderBuilder();
+    }
+
+    function updateValue(tabId, sectionId, questionId, fieldKey, val) {
+        const tab = surveyStructure.find(t => t.id === tabId);
+        if (!tab) return;
+
+        if (!sectionId && !questionId) {
+            tab.title = val;
+        } else if (sectionId && !questionId) {
+            const section = tab.sections.find(s => s.id === sectionId);
+            if (section) section.title = val;
+        } else {
+            const section = tab.sections.find(s => s.id === sectionId);
+            if (section) {
+                const question = section.questions.find(q => q.id === questionId);
+                if (question) {
+                    if (fieldKey === 'options') {
+                        question.options = val.split('\n').map(o => o.trim()).filter(o => o);
+                    } else {
+                        question[fieldKey] = val;
+                    }
+                }
+            }
+        }
+    }
+
+    function renderTabsOnly() {
+        const container = document.getElementById('tabs-container');
+        container.innerHTML = surveyStructure.map(tab => {
+            const isActive = tab.id === activeTabId;
+            return `
+                <div onclick="switchTab('${tab.id}')" class="group flex items-center gap-1.5 border-b-2 py-2 px-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap cursor-pointer transition-all ${isActive ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600'}">
+                    <input type="text" value="${tab.title}" 
+                        onclick="event.stopPropagation()"
+                        oninput="updateValue('${tab.id}', null, null, 'title', this.value)" 
+                        class="bg-transparent font-semibold uppercase tracking-wider text-xs focus:outline-none w-24 text-ellipsis">
+                    ${surveyStructure.length > 1 ? `<button onclick="removeTab('${tab.id}', event)" class="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-rose-500 font-normal transition pl-0.5">✕</button>` : ''}
+                </div>`;
+        }).join('') + `<button onclick="addTab()" class="text-slate-400 hover:text-slate-800 px-3 py-1 text-sm font-bold transition" title="Create New Step">+</button>`;
+    }
+
+    function renderBuilder() {
+        renderTabsOnly();
+        const canvas = document.getElementById('survey-canvas');
+        const activeTab = surveyStructure.find(t => t.id === activeTabId);
+
+        if (!activeTab || activeTab.sections.length === 0) {
+            canvas.innerHTML = `
+                <div class="text-center py-16 border border-dashed border-slate-200 bg-white rounded-xl text-slate-400 card-shadow">
+                    <p class="text-xs font-medium uppercase tracking-wider text-slate-400">Empty Layout Container Step</p>
+                    <button onclick="addSection('${activeTabId}')" class="mt-4 inline-flex items-center bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium py-1.5 px-3 rounded shadow-sm transition">
+                        + Add Section Container
+                    </button>
+                </div>`;
+            return;
+        }
+
+        canvas.innerHTML = activeTab.sections.map(section => `
+            <div class="bg-white border border-slate-100 rounded-lg card-shadow overflow-hidden mb-8">
+                <div class="bg-slate-50/50 px-5 py-3.5 border-b border-slate-100 flex justify-between items-center">
+                    <div class="flex items-center gap-2 w-2/3">
+                        <span class="text-[10px] font-bold text-slate-300 uppercase tracking-wider">Section</span>
+                        <input type="text" value="${section.title}" 
+                            oninput="updateValue('${activeTabId}', '${section.id}', null, 'title', this.value)" 
+                            class="bg-transparent text-slate-800 text-xs tracking-wide frappe-input-flat w-full" placeholder="Specify Area Designation">
+                    </div>
+                    <button onclick="removeSection('${activeTabId}', '${section.id}')" class="text-xs font-medium text-slate-400 hover:text-rose-500 transition">Delete</button>
+                </div>
+                
+                <div class="p-5 space-y-5 bg-white">
+                    ${section.questions.map(q => renderQuestionNode(section.id, q)).join('')}
+                    <div class="pt-4 flex items-center justify-center gap-2 border-t border-dashed border-slate-100">
+                        <button onclick="addQuestion('${activeTabId}', '${section.id}', 'rating')" class="action-pill">★ Rating</button>
+                        <button onclick="addQuestion('${activeTabId}', '${section.id}', 'options')" class="action-pill">🔘 Choices</button>
+                        <button onclick="addQuestion('${activeTabId}', '${section.id}', 'text')" class="action-pill">📝 Text Input</button>
+                        <button onclick="addQuestion('${activeTabId}', '${section.id}', 'comment')" class="action-pill">ℹ Comment</button>
+                    </div>
+                </div>
+            </div>
+        `).join('') + `
+            <button onclick="addSection('${activeTabId}')" class="w-full flex items-center justify-center gap-2 border border-dashed border-slate-200 bg-white hover:bg-slate-50 text-slate-400 hover:text-slate-700 text-xs font-semibold py-4 rounded-xl card-shadow transition">
+                + Add Section Break Component
+            </button>
+        `;
+    }
+
+    function renderQuestionNode(sectionId, q) {
+        let fieldSpecHtml = '';
+        let interactiveToggleHtml = '';
+        let currentLabelAr = q.label_ar || '';
+
+        if (q.type === 'comment') {
+            fieldSpecHtml = `<div class="mt-2.5 w-full border border-dashed border-slate-200 rounded bg-slate-50/20 text-slate-400 text-[11px] p-3 select-none pointer-events-none italic">Renders as non-input text block instructions.</div>`;
+            interactiveToggleHtml = '';
+        } else {
+            interactiveToggleHtml = `
+                <label class="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                    <input type="checkbox" ${q.required ? 'checked' : ''} 
+                        onchange="updateValue('${activeTabId}', '${sectionId}', '${q.id}', 'required', this.checked)"
+                        class="w-3 h-3 rounded text-slate-900 border-slate-300 focus:ring-0">
+                    <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 group-hover:text-slate-500">Required</span>
+                </label>`;
+
+            if (q.type === 'rating') {
+                fieldSpecHtml = `<div class="flex gap-1 text-xs text-amber-400 mt-2.5 pointer-events-none select-none">★ ★ ★ ★ ★</div>`;
+            } else if (q.type === 'options') {
+                fieldSpecHtml = `
+                    <div class="mt-3.5 bg-slate-50/50 p-3 rounded border border-slate-100">
+                        <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">Configure Options Matrix (Line Separated)</label>
+                        <textarea class="w-full text-xs font-mono p-2 border border-slate-200 rounded bg-white focus:outline-none focus:border-slate-300 transition" 
+                            rows="2" oninput="updateValue('${activeTabId}', '${sectionId}', '${q.id}', 'options', this.value)">${q.options ? q.options.join('\n') : ''}</textarea>
+                    </div>`;
+            } else if (q.type === 'text') {
+                fieldSpecHtml = `<div class="mt-2.5 w-full h-8 border border-slate-100 rounded bg-slate-50/30 text-slate-400 text-xs flex items-center px-3 select-none pointer-events-none italic">Open-ended text format layout...</div>`;
+            }
+        }
+
+        const bgThemeClass = q.type === 'comment' ? 'bg-slate-50/60 border-dashed' : 'bg-white';
+
+        return `
+            <div class="p-4 border border-slate-100 rounded-lg ${bgThemeClass} relative group transition-all hover:border-slate-200 hover:shadow-xs">
+                <div class="flex justify-between items-start gap-4">
+                    <div class="flex-1 space-y-3">
+                        <div class="flex items-center justify-between mb-1">
+                            <div class="flex items-center gap-2">
+                                <span class="inline-block text-[9px] font-bold uppercase tracking-widest text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">${q.type}</span>
+                                ${interactiveToggleHtml}
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">Question Text (EN)</label>
+                            <input type="text" value="${q.label}" 
+                                oninput="updateValue('${activeTabId}', '${sectionId}', '${q.id}', 'label', this.value)" 
+                                class="w-full text-xs font-semibold text-slate-700 frappe-input-flat block focus:border-slate-900" placeholder="English formulation query label...">
+                        </div>
+
+                        <div class="pt-1">
+                            <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5 text-right">نص السؤال (AR)</label>
+                            <input type="text" value="${currentLabelAr}" dir="rtl"
+                                oninput="updateValue('${activeTabId}', '${sectionId}', '${q.id}', 'label_ar', this.value)" 
+                                class="w-full text-xs font-semibold text-slate-700 frappe-input-flat block text-right font-sans focus:border-slate-900" placeholder="اكتب صياغة السؤال باللغة العربية...">
+                        </div>
+
+                        ${fieldSpecHtml}
+                    </div>
+                    <button onclick="removeQuestion('${activeTabId}', '${sectionId}', '${q.id}')" class="text-slate-300 hover:text-rose-500 text-xs p-1 transition opacity-0 group-hover:opacity-100">✕</button>
+                </div>
+            </div>`;
+    }
+
+    function saveSurveyStructure() {
+        const nextDescriptiveName = document.getElementById('builder-title-input').value.trim();
+        if (!nextDescriptiveName) {
+            frappe.msgprint(__('Please provide a valid template descriptive name.'));
+            return;
+        }
+
+        frappe.call({
+            method: "mobility_survey.api.save_survey_template",
+            args: {
+                structure: JSON.stringify(surveyStructure),
+                template_id: targetTemplateId,
+                template_name: nextDescriptiveName 
+            },
+            freeze: true,
+            freeze_message: __("Syncing Schema Layer..."),
+            callback: function(r) {
+                if (!r.exc) {
+                    // Explicitly pass a duration (3 seconds) to force Frappe to fire the alert every time
+                    frappe.show_alert({ 
+                        message: __('Template Configuration Saved'), 
+                        indicator: 'green' 
+                    }, 3);
+                    
+                    descriptiveTemplateName = nextDescriptiveName;
+
+                    // Dynamically manage naming updates back from the database
+                    if (r.message && r.message.template_id) {
+                        targetTemplateId = r.message.template_id;
+                        document.getElementById('doc-id-badge').innerText = targetTemplateId;
+
+                        const newUrl = `${window.location.pathname}?name=${encodeURIComponent(targetTemplateId)}`;
+                        window.history.pushState({ path: newUrl }, '', newUrl);
+                    }
+                }
+            }
+        });
+    }
+
+    document.addEventListener("DOMContentLoaded", () => { initializeBuilderWorkspace(); });
+</script>
+{% endblock %}
