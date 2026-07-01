@@ -8,7 +8,7 @@ from frappe.utils import get_url
 class SurveyTemplate(Document):
 	def get_survey_url(self):
 		base_url = get_url() 
-		return f"{base_url}/survery_view?template={self.name}"
+		return f"{base_url}/survey_view?template={self.name}"
 	
 	def validate(self):
 		self.survey_url = self.get_survey_url()
