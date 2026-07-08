@@ -1,19 +1,21 @@
 frappe.listview_settings['Survey Template'] = {
-    refresh: function(listview) {
-        // 1. Hide the default primary "Add Your DocType" button
-        listview.page.clear_primary_action();
-
-        // 2. Add your custom primary "Create Template" button
-        listview.page.set_primary_action(
-            __('Create Template'), 
-            function() {
-                // Get the current browser protocol and origin
-                let baseUrl = window.location.origin;
-                
-                // Redirect the user to the survey builder
-                window.location.href = `${baseUrl}/survey_builder`;
-            },
-            'plus' // Optional: adds a plus icon to the button
-        );
+    add_fields: ["survey_url", "template_name"],
+    hide_name_column: true,
+    primary_action: function() {
+        window.location.href = `${window.location.origin}/survey_builder`;
+    },
+    button: {
+        show: function(doc) {
+            return true;
+        },
+        get_label: function() {
+            return __("Go to Survey");
+        },
+        get_description: function(doc) {
+            return __("Click to go to Survey");
+        },
+        action: function(doc) {
+            window.location.href = "/survey_view?template=" + doc.name;
+        },
     }
 };
