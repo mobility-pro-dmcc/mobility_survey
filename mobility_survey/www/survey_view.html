@@ -1,4 +1,9 @@
 {% extends "templates/web.html" %}
+{% if frappe.session.user == "Guest" %}
+<script>
+    window.location.href = "/login?redirect-to=" + encodeURIComponent(window.location.pathname + window.location.search);
+</script>
+{% endif %}
 
 {% block style %}
 <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
@@ -70,7 +75,6 @@
 
 {% block page_content %}
 <div class="max-w-2xl mx-auto my-12 px-4 font-sans">
-    
     <div class="mb-8 flex flex-col gap-3">
         <div class="flex justify-between items-center text-xs font-bold uppercase tracking-widest text-slate-400">
             <span id="survey-title-header" class="text-slate-800 font-extrabold truncate max-w-md">Survey Processing Matrix</span>
@@ -98,6 +102,9 @@
 
 {% block script %}
 <script>
+    {% if frappe.session.user == "Guest" %}
+        window.location.href = "/login?redirect-to=" + encodeURIComponent(window.location.pathname + window.location.search);
+    {% endif %}
     let surveyStructure = [];
     let userAnswers = {}; 
     let activePageIndex = 0;
