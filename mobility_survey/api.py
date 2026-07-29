@@ -87,7 +87,7 @@ def save_survey_template(structure, template_id, template_name):
         "template_id": saved_id
     }
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist()
 @rate_limit(key="ip", limit=500, seconds=3600)
 def submit_survey_response(template_id, answers):
     """
